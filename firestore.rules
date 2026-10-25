@@ -1,0 +1,217 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+
+    function validPotteryOption(data) {
+      return
+        (data.optionId == 'kulhad-sea-glass' && data.item == 'Kulhad cup' && data.glaze == 'Sea glass' && data.unitPrice == 480)
+        || (data.optionId == 'kulhad-marigold' && data.item == 'Kulhad cup' && data.glaze == 'Marigold' && data.unitPrice == 480)
+        || (data.optionId == 'tea-bowl-lotus' && data.item == 'Tea bowl' && data.glaze == 'Lotus pink' && data.unitPrice == 720)
+        || (data.optionId == 'tea-bowl-forest' && data.item == 'Tea bowl' && data.glaze == 'Forest green' && data.unitPrice == 720)
+        || (data.optionId == 'mini-planter-sand' && data.item == 'Mini planter' && data.glaze == 'Sandy white' && data.unitPrice == 950)
+        || (data.optionId == 'bud-vase-cobalt' && data.item == 'Bud vase' && data.glaze == 'Cobalt blue' && data.unitPrice == 1450)
+        || (data.optionId == 'diya-terracotta' && data.item == 'Diya' && data.glaze == 'Terracotta red' && data.unitPrice == 350);
+    }
+
+    function validPotteryRequest(data, userId) {
+      return data.keys().hasAll([
+          'optionId', 'item', 'glaze', 'unitPrice', 'quantity', 'totalPrice',
+          'neededBy', 'neededByDate', 'customer', 'status', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'optionId', 'item', 'glaze', 'unitPrice', 'quantity', 'totalPrice',
+          'neededBy', 'neededByDate', 'customer', 'status', 'createdAt', 'updatedAt'
+        ])
+        && validPotteryOption(data)
+        && data.quantity is int
+        && data.quantity >= 1
+        && data.quantity <= 12
+        && data.totalPrice == data.unitPrice * data.quantity
+        && data.neededBy is string
+        && data.neededBy.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.neededByDate is timestamp
+        && data.neededByDate > request.time + duration.value(14, 'd')
+        && data.customer is map
+        && data.customer.uid == userId
+        && data.customer.name is string
+        && data.customer.email is string;
+    }
+
+    match /products/{productId} {
+      allow read: if true;
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasAll([
+          'name', 'description', 'badge', 'category', 'price',
+          'image', 'createdAt', 'createdBy'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'name', 'description', 'badge', 'category', 'price',
+          'image', 'createdAt', 'createdBy'
+        ])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 80
+        && request.resource.data.description is string
+        && request.resource.data.description.size() > 0
+        && request.resource.data.description.size() <= 240
+        && request.resource.data.badge is string
+        && request.resource.data.badge.size() > 0
+        && request.resource.data.badge.size() <= 32
+        && request.resource.data.category in ['prints', 'textiles', 'collectibles']
+        && request.resource.data.price is number
+        && request.resource.data.price > 0
+        && request.resource.data.price <= 1000000
+        && request.resource.data.image is string
+        && request.resource.data.image.matches('https://.*')
+        && request.resource.data.createdBy == request.auth.uid
+        && (request.method == 'create'
+          ? request.resource.data.createdAt == request.time
+          : request.resource.data.createdAt == resource.data.createdAt);
+      allow delete: if isAdmin();
+    }
+
+    match /wallAvailability/{bookingDate} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasAll(['date', 'ownerUid'])
+        && request.resource.data.keys().hasOnly(['date', 'ownerUid'])
+        && request.resource.data.date == bookingDate
+        && request.resource.data.ownerUid == request.auth.uid
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)/wallBookings/$(bookingDate)).data.status == 'requested';
+      allow update: if false;
+      allow delete: if isAdmin()
+        || (request.auth != null
+          && resource.data.ownerUid == request.auth.uid
+          && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)/wallBookings/$(bookingDate)).data.status == 'cancelled');
+    }
+
+    match /users/{userId}/private/{documentId} {
+      allow read, write: if request.auth != null
+        && request.auth.uid == userId;
+    }
+
+    match /users/{userId}/orders/{orderId} {
+      allow read: if request.auth != null
+        && (request.auth.uid == userId || isAdmin());
+      allow create: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.data.status == 'placed';
+      allow update: if request.auth != null
+        && (request.auth.uid == userId || isAdmin())
+        && resource.data.status == 'placed'
+        && request.resource.data.status == 'cancelled'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'cancelledAt'])
+        && request.resource.data.cancelledAt == request.time;
+      allow delete: if false;
+    }
+
+    match /users/{userId}/wallBookings/{bookingDate} {
+      allow read: if request.auth != null
+        && (request.auth.uid == userId || isAdmin());
+      allow create: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasAll([
+          'date', 'eventDate', 'cancelUntil', 'wallSize', 'ratePerSqFt',
+          'totalPrice', 'address', 'customer', 'status', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'date', 'eventDate', 'cancelUntil', 'wallSize', 'ratePerSqFt',
+          'totalPrice', 'address', 'customer', 'status', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.date == bookingDate
+        && request.resource.data.eventDate is timestamp
+        && request.resource.data.eventDate > request.time + duration.value(7, 'd')
+        && request.resource.data.eventDate < request.time + duration.value(91, 'd')
+        && request.resource.data.cancelUntil == request.resource.data.eventDate - duration.value(3, 'd')
+        && request.resource.data.wallSize is int
+        && request.resource.data.wallSize >= 10
+        && request.resource.data.wallSize <= 500
+        && request.resource.data.ratePerSqFt == 18
+        && request.resource.data.totalPrice == request.resource.data.wallSize * 18
+        && request.resource.data.address is map
+        && request.resource.data.address.keys().hasAll(['fullName', 'phone', 'line1', 'line2', 'city', 'state', 'postalCode'])
+        && request.resource.data.address.keys().hasOnly(['fullName', 'phone', 'line1', 'line2', 'city', 'state', 'postalCode'])
+        && request.resource.data.address.fullName is string
+        && request.resource.data.address.fullName.size() > 0
+        && request.resource.data.address.phone is string
+        && request.resource.data.address.phone.size() > 0
+        && request.resource.data.address.line1 is string
+        && request.resource.data.address.line1.size() > 0
+        && request.resource.data.address.line2 is string
+        && request.resource.data.address.city is string
+        && request.resource.data.address.city.size() > 0
+        && request.resource.data.address.state is string
+        && request.resource.data.address.state.size() > 0
+        && request.resource.data.address.postalCode is string
+        && request.resource.data.address.postalCode.size() > 0
+        && request.resource.data.customer is map
+        && request.resource.data.customer.uid == userId
+        && request.resource.data.customer.name is string
+        && request.resource.data.customer.email is string
+        && request.resource.data.status == 'requested'
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && getAfter(/databases/$(database)/documents/wallAvailability/$(bookingDate)).data.ownerUid == userId;
+      allow update: if request.auth != null
+        && (request.auth.uid == userId
+          ? resource.data.status in ['requested', 'confirmed']
+            && request.resource.data.status == 'cancelled'
+            && request.time <= resource.data.cancelUntil
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+            && request.resource.data.updatedAt == request.time
+          : isAdmin()
+            && resource.data.status == 'requested'
+            && request.resource.data.status in ['confirmed', 'declined']
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+            && request.resource.data.updatedAt == request.time);
+      allow delete: if false;
+    }
+
+    match /users/{userId}/potteryRequests/{requestId} {
+      allow read: if request.auth != null
+        && (request.auth.uid == userId || isAdmin());
+      allow create: if request.auth != null
+        && request.auth.uid == userId
+        && validPotteryRequest(request.resource.data, userId)
+        && request.resource.data.status == 'requested'
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if request.auth != null
+        && (request.auth.uid == userId
+          ? resource.data.status == 'requested'
+            && (request.resource.data.status == 'cancelled'
+              ? request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+              : request.resource.data.status == 'requested'
+                && validPotteryRequest(request.resource.data, userId)
+                && request.resource.data.createdAt == resource.data.createdAt
+                && request.resource.data.customer == resource.data.customer
+                && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                  'optionId', 'item', 'glaze', 'unitPrice', 'quantity',
+                  'totalPrice', 'neededBy', 'neededByDate', 'updatedAt'
+                ]))
+            && request.resource.data.updatedAt == request.time
+          : isAdmin()
+            && resource.data.status == 'requested'
+            && request.resource.data.status in ['accepted', 'declined']
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+            && request.resource.data.updatedAt == request.time);
+      allow delete: if false;
+    }
+
+    match /{path=**}/orders/{orderId} {
+      allow read: if isAdmin();
+    }
+
+    match /{path=**}/wallBookings/{bookingId} {
+      allow read: if isAdmin();
+    }
+
+    match /{path=**}/potteryRequests/{requestId} {
+      allow read: if isAdmin();
+    }
+  }
+}
