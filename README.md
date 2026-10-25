@@ -15,6 +15,10 @@ Katha Studio is a small art storefront and studio-service booking site. Customer
 - [Important behavior and limitations](#important-behavior-and-limitations)
 - [Troubleshooting](#troubleshooting)
 
+<img width="1886" height="1083" alt="image" src="https://github.com/user-attachments/assets/ed005da0-0d93-48db-8f20-59a7cd59c9ca" />
+<img width="1902" height="1088" alt="image" src="https://github.com/user-attachments/assets/3a453188-29a6-49c2-88d2-8b6fccb44f2f" />
+<img width="1656" height="1198" alt="image" src="https://github.com/user-attachments/assets/d6297bdc-19c0-4a70-a84f-6fa5d39715c3" />
+
 ## Features
 
 ### Customer storefront
